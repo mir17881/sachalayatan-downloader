@@ -258,23 +258,28 @@
    CONFIG
 ───────────────────────────────────────────── */
 const BASE_URL  = 'http://www.sachalayatan.com';
-const DELAY_MS  = 2000; // ms between requests (polite crawling)
+const DELAY_MS  = 2500; // ms between requests (polite crawling)
 
-// Proxy chain — tried in order, falls back on failure
+// Proxies are used in round-robin rotation so no single proxy gets
+// hammered — each request uses the next proxy in the list.
 const PROXIES = [
   {
+    name: 'allorigins',
     build: url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
     extract: async res => { const d = await res.json(); return d.contents || ''; },
   },
   {
-    build: url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-    extract: async res => res.text(),
-  },
-  {
+    name: 'corsproxy.io',
     build: url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
     extract: async res => res.text(),
   },
+  {
+    name: 'codetabs',
+    build: url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    extract: async res => res.text(),
+  },
 ];
+let proxyIndex = 0; // rotates forward after each successful fetch
 
 // Drupal path segments that are never article usernames (used in "all" mode)
 const SKIP_SEGMENTS = new Set([
@@ -359,38 +364,42 @@ $('usernameInput').addEventListener('keydown', e => {
 
 /* ─────────────────────────────────────────────
    PROXY FETCH  (returns HTML string)
-   Tries each proxy in PROXIES order; on failure
-   waits with exponential backoff before next proxy.
+   Round-robin across proxies so no single proxy
+   is hammered. On failure, tries every other proxy
+   with backoff before giving up.
 ───────────────────────────────────────────── */
+function fetchWithTimeout(url, ms) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal })
+    .finally(() => clearTimeout(id));
+}
+
 async function fetchHTML(url) {
+  // Try each proxy starting from the current rotation index
+  const startIdx = proxyIndex;
   let lastErr;
-  for (let i = 0; i < PROXIES.length; i++) {
-    const proxy = PROXIES[i];
-    try {
-      const res = await fetch(proxy.build(url), { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const html = await proxy.extract(res);
-      if (!html || html.length < 100) throw new Error('Empty or too-short response');
-      return html;
-    } catch (err) {
-      lastErr = err;
-      // Short pause before trying the next proxy
-      if (i < PROXIES.length - 1) await sleep(1500);
+
+  for (let pass = 0; pass < 2; pass++) {           // 2 full passes max
+    for (let i = 0; i < PROXIES.length; i++) {
+      const idx   = (startIdx + i) % PROXIES.length;
+      const proxy = PROXIES[idx];
+      try {
+        const res  = await fetchWithTimeout(proxy.build(url), 20000);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const html = await proxy.extract(res);
+        if (!html || html.length < 200) throw new Error('Response too short');
+        proxyIndex = (idx + 1) % PROXIES.length;   // advance rotation on success
+        return html;
+      } catch (err) {
+        lastErr = err;
+        log(`  proxy ${proxy.name} failed (${err.message}), trying next…`, 'log-dim');
+        await sleep(1500);
+      }
     }
-  }
-  // All proxies failed — wait longer and try the whole chain once more
-  await sleep(5000);
-  for (let i = 0; i < PROXIES.length; i++) {
-    const proxy = PROXIES[i];
-    try {
-      const res = await fetch(proxy.build(url), { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const html = await proxy.extract(res);
-      if (!html || html.length < 100) throw new Error('Empty or too-short response');
-      return html;
-    } catch (err) {
-      lastErr = err;
-      if (i < PROXIES.length - 1) await sleep(1500);
+    if (pass === 0) {
+      log('  All proxies failed once, waiting 8 s before retry…', 'log-dim');
+      await sleep(8000);
     }
   }
   throw new Error(`All proxies failed: ${lastErr.message}`);
