@@ -1,14 +1,59 @@
 # Sachalayatan Article Downloader
 
-A one-page web tool that lets any Sachalayatan writer enter their username and download all their articles as individual PDFs, packaged in a single ZIP file. A site moderator can also type `all` to download every article published on the entire site.
+Two tools in one repo — use whichever fits your situation:
 
-**Live site:** https://mir17881.github.io/sachalayatan-downloader/
+| | Web tool | Python script |
+|---|---|---|
+| **Who it's for** | Any writer, no setup | Admin / power user |
+| **Speed** | Slow (proxy rate limits) | Fast (direct connection) |
+| **Setup** | None — open a URL | `pip install` + one command |
+| **Bengali text** | ✓ | ✓ (headless Chromium) |
+| **"all" mode** | ✓ | ✓ |
+
+**Live web tool:** https://mir17881.github.io/sachalayatan-downloader/
 
 **GitHub repo:** https://github.com/mir17881/sachalayatan-downloader
 
 ---
 
-## How it works (no server required)
+## Python script (fast, for power users)
+
+### Setup — one time only
+
+```powershell
+pip install requests beautifulsoup4 lxml playwright
+playwright install chromium
+```
+
+### Usage
+
+```powershell
+# Download one writer's articles
+python sachalayatan_pdf.py mir178
+
+# Download every article on the entire site
+python sachalayatan_pdf.py all
+```
+
+PDFs are saved to a folder named after the username (e.g. `mir178\001_Title.pdf`).  
+For `all` mode the folder is named `sachalayatan_all\`.
+
+### How to get the script
+
+Clone the repo:
+
+```powershell
+git clone https://github.com/mir17881/sachalayatan-downloader.git
+cd sachalayatan-downloader
+```
+
+Or just download `sachalayatan_pdf.py` directly from the repo.
+
+---
+
+## Web tool (no setup, for writers)
+
+### How it works (no server required)
 
 Everything runs in the visitor's browser:
 
