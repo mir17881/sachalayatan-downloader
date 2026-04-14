@@ -447,10 +447,19 @@ function scrapeArticle(html, url) {
 
   let bodyHTML = '';
   if (bodyEl) {
-    // Strip social-share widgets
+    // Strip social-share widgets and JS-only noise
     bodyEl.querySelectorAll(
-      '.addthis_toolbox, .addthis_default_style, .social-share, .sharethis-wrapper, .links'
+      '.addthis_toolbox, .addthis_default_style, .social-share, .sharethis-wrapper, .links, script, noscript'
     ).forEach(el => el.remove());
+
+    // Rewrite relative image src → absolute so they load in the PDF renderer
+    bodyEl.querySelectorAll('img[src]').forEach(img => {
+      const src = img.getAttribute('src');
+      if (src && !src.startsWith('http')) {
+        img.setAttribute('src', 'http://www.sachalayatan.com' + (src.startsWith('/') ? src : '/' + src));
+      }
+    });
+
     bodyHTML = bodyEl.innerHTML;
   }
 
@@ -458,19 +467,41 @@ function scrapeArticle(html, url) {
 }
 
 /* ─────────────────────────────────────────────
+   WAIT FOR ALL IMAGES IN A CONTAINER TO LOAD
+───────────────────────────────────────────── */
+async function waitForImages(container) {
+  const imgs = Array.from(container.querySelectorAll('img'));
+  await Promise.allSettled(
+    imgs.map(img => new Promise(resolve => {
+      if (img.complete && img.naturalWidth > 0) { resolve(); return; }
+      img.onload  = resolve;
+      img.onerror = resolve;              // don't block on broken images
+      setTimeout(resolve, 8000);          // hard cap: 8 s per image
+    }))
+  );
+}
+
+/* ─────────────────────────────────────────────
    GENERATE PDF BYTES  (ArrayBuffer)  for one article
 ───────────────────────────────────────────── */
 async function generatePDF(article) {
-  // Build a self-contained HTML snippet with Bengali font + clean layout
   const container = document.createElement('div');
+
+  // position: absolute off-screen (NOT fixed) so the element can grow
+  // to its natural full height without being clipped by the viewport
   container.style.cssText = `
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: 794px;
     font-family: 'Hind Siliguri', 'Inter', sans-serif;
     font-size: 14px;
     line-height: 1.8;
     color: #1a1a2e;
     padding: 32px 40px;
-    max-width: 740px;
+    background: #fff;
   `;
+
   container.innerHTML = `
     <h1 style="font-size:22px;font-weight:600;margin-bottom:8px;line-height:1.4;
                font-family:'Hind Siliguri','Inter',sans-serif;">
@@ -483,35 +514,41 @@ async function generatePDF(article) {
       Source: <a href="${article.url}" style="color:#2d6a9f;">${article.url}</a>
     </div>
     <hr style="border:none;border-top:1px solid #e0e0e0;margin-bottom:24px;" />
-    <div style="font-family:'Hind Siliguri','Inter',sans-serif;">
+    <div style="font-family:'Hind Siliguri','Inter',sans-serif;word-wrap:break-word;overflow-wrap:break-word;">
       ${article.bodyHTML || '<p style="color:#999;font-style:italic;">No content extracted.</p>'}
     </div>
   `;
 
-  // Temporarily attach to DOM (required by html2canvas)
-  container.style.position = 'fixed';
-  container.style.top = '-9999px';
-  container.style.left = '-9999px';
-  container.style.width = '800px';
   document.body.appendChild(container);
 
   try {
+    // Wait for all images inside the article to finish loading
+    await waitForImages(container);
+
+    // Read the full rendered height AFTER images load
+    const fullHeight = container.scrollHeight;
+
     const pdfBytes = await html2pdf()
       .set({
         margin:      [10, 10, 10, 10],
         filename:    sanitizeFilename(article.title) + '.pdf',
         html2canvas: {
-          scale:      2,
-          useCORS:    true,
-          allowTaint: true,
-          logging:    false,
+          scale:        2,
+          useCORS:      true,
+          allowTaint:   true,
+          logging:      false,
+          scrollX:      0,
+          scrollY:      0,
+          windowWidth:  794,
+          windowHeight: fullHeight,   // full article height, not viewport
         },
         jsPDF: {
           unit:        'mm',
           format:      'a4',
           orientation: 'portrait',
+          compress:    true,
         },
-        pagebreak: { mode: ['avoid-all', 'css'] },
+        pagebreak: { mode: 'legacy' }, // most reliable for long content
       })
       .from(container)
       .outputPdf('arraybuffer');
