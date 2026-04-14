@@ -261,11 +261,16 @@ const BASE_URL   = 'https://www.sachalayatan.com';
 const PROXY_URL  = 'https://api.allorigins.win/get?url=';
 const DELAY_MS   = 1600; // ms between requests (polite crawling)
 
-// Drupal path segments that are never article usernames
+// Drupal path segments that are never article usernames (used in "all" mode)
 const SKIP_SEGMENTS = new Set([
   'node','admin','user','blog','sites','modules','themes',
   'misc','files','system','logout','search','taxonomy',
   'comment','aggregator','tracker','contact',
+]);
+
+// Sub-paths after a username that are never articles
+const SKIP_ARTICLE_PATHS = new Set([
+  'track','feed','contact','edit','delete','revisions',
 ]);
 
 /* ─────────────────────────────────────────────
@@ -366,19 +371,24 @@ function parseArticleLinks(html, uname) {
   const seen = new Set();
   const links = [];
 
-  // Specific user: /<username>/<digits>
-  // All mode: /<any-non-reserved-segment>/<digits>
+  // Match /<username>/<slug> where slug is numeric OR a text alias.
+  // "all" mode: any non-reserved username segment.
+  // Both modes: slug must not be a known Drupal sub-path (track, feed, etc.)
   const pattern = uname
-    ? new RegExp(`^(?:${BASE_URL})?/${uname}/(\\d+)(?:[?#].*)?$`)
-    : new RegExp(`^(?:${BASE_URL})?/([a-zA-Z0-9_-]+)/(\\d+)(?:[?#].*)?$`);
+    ? new RegExp(`^(?:${BASE_URL})?/${uname}/([\\w-]+)(?:[?#].*)?$`)
+    : new RegExp(`^(?:${BASE_URL})?/([a-zA-Z0-9_-]+)/([\\w-]+)(?:[?#].*)?$`);
 
   for (const a of doc.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href').split('?')[0].split('#')[0];
     const m = href.match(pattern);
     if (!m) continue;
 
-    // In "all" mode, skip reserved Drupal path segments
-    if (!uname && SKIP_SEGMENTS.has(m[1])) continue;
+    // In "all" mode m[1]=username, m[2]=slug; in user mode m[1]=slug
+    const slug    = uname ? m[1] : m[2];
+    const uSeg    = uname ? uname : m[1];
+
+    if (SKIP_ARTICLE_PATHS.has(slug)) continue;
+    if (!uname && SKIP_SEGMENTS.has(uSeg)) continue;
 
     const full = href.startsWith('http') ? href : BASE_URL + href;
     if (!seen.has(full)) { seen.add(full); links.push(full); }
