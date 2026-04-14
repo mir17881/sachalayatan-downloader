@@ -257,9 +257,24 @@
 /* ─────────────────────────────────────────────
    CONFIG
 ───────────────────────────────────────────── */
-const BASE_URL   = 'http://www.sachalayatan.com';
-const PROXY_URL  = 'https://api.allorigins.win/get?url=';
-const DELAY_MS   = 1600; // ms between requests (polite crawling)
+const BASE_URL  = 'http://www.sachalayatan.com';
+const DELAY_MS  = 2000; // ms between requests (polite crawling)
+
+// Proxy chain — tried in order, falls back on failure
+const PROXIES = [
+  {
+    build: url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+    extract: async res => { const d = await res.json(); return d.contents || ''; },
+  },
+  {
+    build: url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    extract: async res => res.text(),
+  },
+  {
+    build: url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    extract: async res => res.text(),
+  },
+];
 
 // Drupal path segments that are never article usernames (used in "all" mode)
 const SKIP_SEGMENTS = new Set([
@@ -344,22 +359,41 @@ $('usernameInput').addEventListener('keydown', e => {
 
 /* ─────────────────────────────────────────────
    PROXY FETCH  (returns HTML string)
+   Tries each proxy in PROXIES order; on failure
+   waits with exponential backoff before next proxy.
 ───────────────────────────────────────────── */
-async function fetchHTML(url, attempt = 1) {
-  const proxyReq = PROXY_URL + encodeURIComponent(url);
-  try {
-    const res = await fetch(proxyReq);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (!data.contents) throw new Error('Empty response from proxy');
-    return data.contents;
-  } catch (err) {
-    if (attempt < 3) {
-      await sleep(2000 * attempt);
-      return fetchHTML(url, attempt + 1);
+async function fetchHTML(url) {
+  let lastErr;
+  for (let i = 0; i < PROXIES.length; i++) {
+    const proxy = PROXIES[i];
+    try {
+      const res = await fetch(proxy.build(url), { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const html = await proxy.extract(res);
+      if (!html || html.length < 100) throw new Error('Empty or too-short response');
+      return html;
+    } catch (err) {
+      lastErr = err;
+      // Short pause before trying the next proxy
+      if (i < PROXIES.length - 1) await sleep(1500);
     }
-    throw err;
   }
+  // All proxies failed — wait longer and try the whole chain once more
+  await sleep(5000);
+  for (let i = 0; i < PROXIES.length; i++) {
+    const proxy = PROXIES[i];
+    try {
+      const res = await fetch(proxy.build(url), { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const html = await proxy.extract(res);
+      if (!html || html.length < 100) throw new Error('Empty or too-short response');
+      return html;
+    } catch (err) {
+      lastErr = err;
+      if (i < PROXIES.length - 1) await sleep(1500);
+    }
+  }
+  throw new Error(`All proxies failed: ${lastErr.message}`);
 }
 
 /* ─────────────────────────────────────────────
