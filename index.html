@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sachalayatan Article Downloader</title>
+
+  <!-- Bengali + UI fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- JSZip -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- html2pdf (html2canvas + jsPDF bundled) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f4f6f9;
+      color: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 16px 80px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      width: 100%;
+      max-width: 680px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2d6a9f 100%);
+      padding: 32px 36px;
+      color: #fff;
+    }
+    .card-header h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+    .card-header p  { font-size: 14px; opacity: 0.8; line-height: 1.5; }
+
+    .card-body { padding: 36px; }
+
+    /* ── Input section ── */
+    .input-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .input-group input {
+      flex: 1;
+      border: 1.5px solid #d0d7e3;
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-size: 15px;
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .input-group input:focus { border-color: #2d6a9f; }
+    .input-group input:disabled { background: #f8f9fc; }
+
+    button#startBtn {
+      background: #2d6a9f;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 11px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .15s, opacity .15s;
+    }
+    button#startBtn:hover:not(:disabled) { background: #1e3a5f; }
+    button#startBtn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .url-preview {
+      font-size: 12px;
+      color: #7a8599;
+      margin-bottom: 28px;
+      min-height: 18px;
+    }
+    .url-preview span { color: #2d6a9f; font-weight: 500; }
+
+    /* ── Progress section ── */
+    #progressSection { display: none; }
+
+    .steps {
+      display: flex;
+      gap: 0;
+      margin-bottom: 24px;
+    }
+    .step {
+      flex: 1;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 8px 4px;
+      color: #aab0bd;
+      border-bottom: 2px solid #e8ecf2;
+      transition: all .2s;
+    }
+    .step.active  { color: #2d6a9f; border-color: #2d6a9f; }
+    .step.done    { color: #27ae60; border-color: #27ae60; }
+
+    .status-line {
+      font-size: 13px;
+      color: #444;
+      margin-bottom: 10px;
+      min-height: 20px;
+    }
+
+    .progress-bar-wrap {
+      background: #e8ecf2;
+      border-radius: 99px;
+      height: 8px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #2d6a9f, #27ae60);
+      border-radius: 99px;
+      width: 0%;
+      transition: width .3s ease;
+    }
+
+    .log-box {
+      background: #f8f9fc;
+      border: 1px solid #e8ecf2;
+      border-radius: 8px;
+      height: 220px;
+      overflow-y: auto;
+      padding: 12px 14px;
+      font-size: 12px;
+      line-height: 1.7;
+      font-family: 'Hind Siliguri', 'Inter', sans-serif;
+    }
+    .log-box .log-ok   { color: #1a7a4a; }
+    .log-box .log-err  { color: #c0392b; }
+    .log-box .log-info { color: #444; }
+    .log-box .log-dim  { color: #888; }
+
+    /* ── Download button ── */
+    #downloadWrap { display: none; margin-top: 24px; text-align: center; }
+    #downloadBtn {
+      background: #27ae60;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 14px 36px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    #downloadBtn:hover { background: #1e8e4e; }
+    .download-note {
+      font-size: 11px;
+      color: #7a8599;
+      margin-top: 8px;
+    }
+
+    /* ── Error summary ── */
+    #errorSummary { display: none; margin-top: 16px; }
+    .error-box {
+      background: #fdf3f2;
+      border: 1px solid #f5c6c2;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: #a93226;
+    }
+    .error-box strong { display: block; margin-bottom: 4px; }
+
+    /* ── Reset link ── */
+    #resetBtn {
+      display: none;
+      margin-top: 16px;
+      background: none;
+      border: none;
+      color: #7a8599;
+      font-size: 13px;
+      cursor: pointer;
+      text-decoration: underline;
+      padding: 0;
+    }
+    #resetBtn:hover { color: #2d6a9f; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <h1>সচলায়তন Article Downloader</h1>
+    <p>Enter your Sachalayatan username to download all your articles as individual PDFs in a single ZIP file.</p>
+  </div>
+
+  <div class="card-body">
+
+    <!-- Input -->
+    <div class="input-group">
+      <input
+        id="usernameInput"
+        type="text"
+        placeholder="e.g. mir178"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="startBtn" onclick="startDownload()">Download All</button>
+    </div>
+    <div class="url-preview" id="urlPreview">&nbsp;</div>
+
+    <!-- Progress -->
+    <div id="progressSection">
+      <div class="steps">
+        <div class="step" id="step1">1 · Discover pages</div>
+        <div class="step" id="step2">2 · Collect articles</div>
+        <div class="step" id="step3">3 · Generate PDFs</div>
+        <div class="step" id="step4">4 · Package ZIP</div>
+      </div>
+      <div class="status-line" id="statusLine">Starting…</div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="log-box" id="logBox"></div>
+    </div>
+
+    <!-- Download -->
+    <div id="downloadWrap">
+      <button id="downloadBtn" onclick="triggerDownload()">⬇ Download ZIP</button>
+      <div class="download-note" id="downloadNote"></div>
+    </div>
+
+    <!-- Errors -->
+    <div id="errorSummary">
+      <div class="error-box">
+        <strong id="errorTitle"></strong>
+        <div id="errorList"></div>
+      </div>
+    </div>
+
+    <button id="resetBtn" onclick="resetUI()">← Start over</button>
+  </div>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────
+   CONFIG
+───────────────────────────────────────────── */
+const BASE_URL   = 'https://www.sachalayatan.com';
+const PROXY_URL  = 'https://api.allorigins.win/get?url=';
+const DELAY_MS   = 1600; // ms between requests (polite crawling)
+
+/* ─────────────────────────────────────────────
+   STATE
+───────────────────────────────────────────── */
+let zipBlob   = null;
+let username  = '';
+let failedArticles = [];
+
+/* ─────────────────────────────────────────────
+   UI HELPERS
+───────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+
+function log(msg, cls = 'log-info') {
+  const box = $('logBox');
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = msg;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function setStatus(msg)  { $('statusLine').textContent = msg; }
+function setProgress(pct) { $('progressFill').style.width = Math.min(100, pct) + '%'; }
+
+function setStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = $('step' + i);
+    if (i < n)  { el.className = 'step done'; }
+    else if (i === n) { el.className = 'step active'; }
+    else        { el.className = 'step'; }
+  }
+}
+
+function resetUI() {
+  zipBlob = null; username = ''; failedArticles = [];
+  $('usernameInput').value = '';
+  $('usernameInput').disabled = false;
+  $('startBtn').disabled = false;
+  $('progressSection').style.display = 'none';
+  $('downloadWrap').style.display    = 'none';
+  $('errorSummary').style.display    = 'none';
+  $('resetBtn').style.display        = 'none';
+  $('logBox').innerHTML = '';
+  $('urlPreview').innerHTML = '&nbsp;';
+  setProgress(0);
+  for (let i = 1; i <= 4; i++) $('step' + i).className = 'step';
+}
+
+/* ─────────────────────────────────────────────
+   LIVE URL PREVIEW
+───────────────────────────────────────────── */
+$('usernameInput').addEventListener('input', () => {
+  const val = $('usernameInput').value.trim();
+  if (val) {
+    $('urlPreview').innerHTML =
+      `Will scrape: <span>sachalayatan.com/blog/${val}</span>`;
+  } else {
+    $('urlPreview').innerHTML = '&nbsp;';
+  }
+});
+
+$('usernameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startDownload();
+});
+
+/* ─────────────────────────────────────────────
+   PROXY FETCH  (returns HTML string)
+───────────────────────────────────────────── */
+async function fetchHTML(url, attempt = 1) {
+  const proxyReq = PROXY_URL + encodeURIComponent(url);
+  try {
+    const res = await fetch(proxyReq);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.contents) throw new Error('Empty response from proxy');
+    return data.contents;
+  } catch (err) {
+    if (attempt < 3) {
+      await sleep(2000 * attempt);
+      return fetchHTML(url, attempt + 1);
+    }
+    throw err;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   PARSE ARTICLE LINKS from a listing page
+───────────────────────────────────────────── */
+function parseArticleLinks(html, uname) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const seen = new Set();
+  const links = [];
+  const pattern = new RegExp(`^(?:${BASE_URL})?/${uname}/(\\d+)(?:[?#].*)?$`);
+
+  for (const a of doc.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href').split('?')[0].split('#')[0];
+    if (pattern.test(href)) {
+      const full = href.startsWith('http') ? href : BASE_URL + href;
+      if (!seen.has(full)) { seen.add(full); links.push(full); }
+    }
+  }
+  return links;
+}
+
+/* ─────────────────────────────────────────────
+   COUNT TOTAL PAGINATION PAGES
+───────────────────────────────────────────── */
+function getTotalPages(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // Drupal pager: li.pager-last a  →  href="?page=N"
+  const pagerLast = doc.querySelector('li.pager-last a');
+  if (pagerLast) {
+    const m = (pagerLast.getAttribute('href') || '').match(/page=(\d+)/);
+    if (m) return parseInt(m[1]) + 1;
+  }
+
+  // Fallback: find the highest page= number across all pager links
+  const pages = new Set();
+  for (const a of doc.querySelectorAll('a[href*="page="]')) {
+    const m = (a.getAttribute('href') || '').match(/page=(\d+)/);
+    if (m) pages.add(parseInt(m[1]));
+  }
+  return pages.size > 0 ? Math.max(...pages) + 1 : 1;
+}
+
+/* ─────────────────────────────────────────────
+   SCRAPE A SINGLE ARTICLE  →  { title, dateStr, bodyHTML }
+───────────────────────────────────────────── */
+function scrapeArticle(html, url) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // Fix relative URLs in the parsed document so images/links resolve correctly
+  const base = doc.createElement('base');
+  base.href = BASE_URL;
+  doc.head.prepend(base);
+
+  // Title (Drupal: h1.title or h2.title)
+  const titleEl = doc.querySelector('h1.title, h2.title, h1.page-header');
+  const title   = titleEl ? titleEl.textContent.trim() : decodeURI(url.split('/').pop());
+
+  // Published date  (format: "সোমবার, 29/03/2021 - 2:47")
+  const dateEl  = doc.querySelector('span.date-display-single, span.submitted');
+  const dateStr = dateEl ? dateEl.textContent.trim() : '';
+
+  // Body: Drupal wraps content in  div#node-NNNNN-content
+  let bodyEl = doc.querySelector('div[id^="node-"][id$="-content"]');
+
+  // Fallback selectors
+  if (!bodyEl) bodyEl = doc.querySelector('.node-content, .field-items, article .content');
+
+  let bodyHTML = '';
+  if (bodyEl) {
+    // Strip social-share widgets
+    bodyEl.querySelectorAll(
+      '.addthis_toolbox, .addthis_default_style, .social-share, .sharethis-wrapper, .links'
+    ).forEach(el => el.remove());
+    bodyHTML = bodyEl.innerHTML;
+  }
+
+  return { title, dateStr, bodyHTML, url };
+}
+
+/* ─────────────────────────────────────────────
+   GENERATE PDF BYTES  (ArrayBuffer)  for one article
+───────────────────────────────────────────── */
+async function generatePDF(article) {
+  // Build a self-contained HTML snippet with Bengali font + clean layout
+  const container = document.createElement('div');
+  container.style.cssText = `
+    font-family: 'Hind Siliguri', 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.8;
+    color: #1a1a2e;
+    padding: 32px 40px;
+    max-width: 740px;
+  `;
+  container.innerHTML = `
+    <h1 style="font-size:22px;font-weight:600;margin-bottom:8px;line-height:1.4;
+               font-family:'Hind Siliguri','Inter',sans-serif;">
+      ${article.title}
+    </h1>
+    <div style="font-size:12px;color:#666;margin-bottom:6px;font-family:'Inter',sans-serif;">
+      ${article.dateStr}
+    </div>
+    <div style="font-size:11px;color:#999;margin-bottom:24px;font-family:'Inter',sans-serif;">
+      Source: <a href="${article.url}" style="color:#2d6a9f;">${article.url}</a>
+    </div>
+    <hr style="border:none;border-top:1px solid #e0e0e0;margin-bottom:24px;" />
+    <div style="font-family:'Hind Siliguri','Inter',sans-serif;">
+      ${article.bodyHTML || '<p style="color:#999;font-style:italic;">No content extracted.</p>'}
+    </div>
+  `;
+
+  // Temporarily attach to DOM (required by html2canvas)
+  container.style.position = 'fixed';
+  container.style.top = '-9999px';
+  container.style.left = '-9999px';
+  container.style.width = '800px';
+  document.body.appendChild(container);
+
+  try {
+    const pdfBytes = await html2pdf()
+      .set({
+        margin:      [10, 10, 10, 10],
+        filename:    sanitizeFilename(article.title) + '.pdf',
+        html2canvas: {
+          scale:      2,
+          useCORS:    true,
+          allowTaint: true,
+          logging:    false,
+        },
+        jsPDF: {
+          unit:        'mm',
+          format:      'a4',
+          orientation: 'portrait',
+        },
+        pagebreak: { mode: ['avoid-all', 'css'] },
+      })
+      .from(container)
+      .outputPdf('arraybuffer');
+
+    return pdfBytes;
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
+/* ─────────────────────────────────────────────
+   HELPERS
+───────────────────────────────────────────── */
+function sanitizeFilename(name) {
+  return name
+    .replace(/[\\/:*?"<>|]/g, '')   // Windows-illegal chars
+    .replace(/\s+/g, '_')
+    .replace(/_{2,}/g, '_')
+    .slice(0, 120)                   // max filename length
+    || 'article';
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/* ─────────────────────────────────────────────
+   MAIN ORCHESTRATOR
+───────────────────────────────────────────── */
+async function startDownload() {
+  username = $('usernameInput').value.trim().toLowerCase();
+  if (!username) {
+    alert('Please enter a Sachalayatan username.');
+    return;
+  }
+
+  // Lock UI
+  $('usernameInput').disabled = true;
+  $('startBtn').disabled = true;
+  $('progressSection').style.display = 'block';
+  $('resetBtn').style.display = 'none';
+  failedArticles = [];
+  zipBlob = null;
+
+  const BLOG_URL = `${BASE_URL}/blog/${username}`;
+
+  try {
+    /* ── STEP 1: Discover total pages ── */
+    setStep(1);
+    setStatus('Fetching blog index…');
+    log(`Fetching ${BLOG_URL}`, 'log-dim');
+    setProgress(2);
+
+    const firstPageHTML = await fetchHTML(BLOG_URL);
+    const totalPages = getTotalPages(firstPageHTML);
+    log(`Found ${totalPages} listing page(s)`, 'log-info');
+
+    /* ── STEP 2: Collect all article URLs ── */
+    setStep(2);
+    const allURLs = [];
+
+    const firstPageLinks = parseArticleLinks(firstPageHTML, username);
+    firstPageLinks.forEach(u => allURLs.push(u));
+    log(`Page 1 / ${totalPages}: ${firstPageLinks.length} article(s)`, 'log-info');
+    setProgress(5);
+
+    for (let p = 1; p < totalPages; p++) {
+      setStatus(`Collecting article list — page ${p + 1} of ${totalPages}…`);
+      await sleep(DELAY_MS);
+      const pageURL  = `${BLOG_URL}?page=${p}`;
+      log(`Page ${p + 1} / ${totalPages}: fetching…`, 'log-dim');
+      try {
+        const html  = await fetchHTML(pageURL);
+        const links = parseArticleLinks(html, username);
+        links.forEach(u => { if (!allURLs.includes(u)) allURLs.push(u); });
+        log(`Page ${p + 1} / ${totalPages}: ${links.length} article(s)`, 'log-info');
+      } catch (err) {
+        log(`Page ${p + 1}: failed (${err.message})`, 'log-err');
+      }
+      setProgress(5 + (p / totalPages) * 15);
+    }
+
+    if (allURLs.length === 0) {
+      throw new Error(
+        `No articles found for username "${username}". ` +
+        `Check that the username is correct and the blog is public.`
+      );
+    }
+
+    log(`Total unique articles: ${allURLs.length}`, 'log-info');
+
+    /* ── STEP 3: Generate PDFs ── */
+    setStep(3);
+    const zip = new JSZip();
+    const folder = zip.folder(username);
+
+    for (let i = 0; i < allURLs.length; i++) {
+      const url = allURLs[i];
+      const pct = 20 + ((i / allURLs.length) * 70);
+      setProgress(pct);
+      setStatus(`Generating PDF ${i + 1} of ${allURLs.length}…`);
+
+      try {
+        await sleep(DELAY_MS);
+        const articleHTML = await fetchHTML(url);
+        const article     = scrapeArticle(articleHTML, url);
+        const pdfBytes    = await generatePDF(article);
+
+        const filename = `${String(i + 1).padStart(3, '0')}_${sanitizeFilename(article.title)}.pdf`;
+        folder.file(filename, pdfBytes);
+        log(`✓ [${i + 1}/${allURLs.length}] ${article.title}`, 'log-ok');
+      } catch (err) {
+        log(`✗ [${i + 1}/${allURLs.length}] ${url} — ${err.message}`, 'log-err');
+        failedArticles.push({ url, error: err.message });
+      }
+    }
+
+    /* ── STEP 4: Package ZIP ── */
+    setStep(4);
+    setStatus('Packaging ZIP file…');
+    setProgress(95);
+    log('Building ZIP…', 'log-dim');
+
+    zipBlob = await zip.generateAsync(
+      { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+      metadata => setProgress(95 + (metadata.percent / 100) * 4)
+    );
+
+    setProgress(100);
+    setStep(5); // marks all steps done
+
+    const successCount = allURLs.length - failedArticles.length;
+    setStatus(`Done! ${successCount} PDF(s) packaged.`);
+    log(`─── Complete: ${successCount} succeeded, ${failedArticles.length} failed ───`, 'log-info');
+
+    // Show download button
+    $('downloadWrap').style.display = 'block';
+    $('downloadNote').textContent =
+      `${successCount} article(s) · Extract the ZIP to get the "${username}" folder`;
+
+    // Show error summary if any
+    if (failedArticles.length > 0) {
+      $('errorTitle').textContent =
+        `${failedArticles.length} article(s) could not be downloaded:`;
+      $('errorList').innerHTML = failedArticles
+        .map(f => `<div style="margin-top:4px;">${f.url}<br><em>${f.error}</em></div>`)
+        .join('');
+      $('errorSummary').style.display = 'block';
+    }
+
+  } catch (err) {
+    setStatus(`Error: ${err.message}`);
+    log(`Fatal: ${err.message}`, 'log-err');
+    $('errorTitle').textContent = 'Something went wrong:';
+    $('errorList').textContent  = err.message;
+    $('errorSummary').style.display = 'block';
+  }
+
+  $('resetBtn').style.display = 'inline';
+}
+
+/* ─────────────────────────────────────────────
+   TRIGGER DOWNLOAD
+───────────────────────────────────────────── */
+function triggerDownload() {
+  if (!zipBlob) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(zipBlob);
+  a.download = `${username}_articles.zip`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>
