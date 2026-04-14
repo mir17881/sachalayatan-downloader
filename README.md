@@ -1,8 +1,10 @@
 # Sachalayatan Article Downloader
 
-A one-page web tool that lets any Sachalayatan writer enter their username and download all their articles as individual PDFs, packaged in a single ZIP file.
+A one-page web tool that lets any Sachalayatan writer enter their username and download all their articles as individual PDFs, packaged in a single ZIP file. A site moderator can also type `all` to download every article published on the entire site.
 
-**Live site (once deployed):** `https://<your-github-username>.github.io/sachalayatan-downloader/`
+**Live site:** https://mir17881.github.io/sachalayatan-downloader/
+
+**GitHub repo:** https://github.com/mir17881/sachalayatan-downloader
 
 ---
 
@@ -10,11 +12,11 @@ A one-page web tool that lets any Sachalayatan writer enter their username and d
 
 Everything runs in the visitor's browser:
 
-1. The page fetches the writer's blog listing via a public CORS proxy (`api.allorigins.win`)
+1. The page fetches the blog listing via a public CORS proxy (`api.allorigins.win`)
 2. It walks through all pagination pages and collects every article URL
 3. Each article is fetched, parsed, and converted to a PDF using `html2pdf.js`
-4. All PDFs are bundled into a ZIP file named `<username>_articles.zip` using `JSZip`
-5. The visitor clicks "Download ZIP" — extracting it gives a folder named after the username
+4. All PDFs are bundled into a ZIP file using `JSZip`
+5. The visitor clicks **⬇ Download ZIP** — extracting it gives a folder of individual PDFs
 
 No data ever touches a server you control. The only external services used are:
 - `api.allorigins.win` — free CORS proxy
@@ -23,64 +25,25 @@ No data ever touches a server you control. The only external services used are:
 
 ---
 
-## Deploying to GitHub Pages
-
-### Prerequisites
-- A GitHub account (free tier is fine)
-- Git installed, or use the GitHub web interface
-
-### Step 1 — Create a GitHub repository
-
-1. Go to [github.com](https://github.com) and click **New repository**
-2. Name it `sachalayatan-downloader` (or anything you like)
-3. Set it to **Public** (required for free GitHub Pages)
-4. Click **Create repository**
-
-### Step 2 — Upload the files
-
-**Option A — via GitHub web interface (no Git needed):**
-
-1. Open your new repository on GitHub
-2. Click **Add file → Upload files**
-3. Drag and drop `index.html` into the upload area
-4. Click **Commit changes**
-
-**Option B — via Git (command line):**
-
-```powershell
-cd "C:\Users\mir17\OneDrive\Documents\Claude Code\sachalayatan-downloader"
-git init
-git add index.html README.md
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/<YOUR-GITHUB-USERNAME>/sachalayatan-downloader.git
-git push -u origin main
-```
-
-### Step 3 — Enable GitHub Pages
-
-1. In your repository, click **Settings** (top navigation)
-2. Scroll down to the **Pages** section in the left sidebar
-3. Under **Source**, select **Deploy from a branch**
-4. Choose **main** branch, folder **/ (root)**
-5. Click **Save**
-
-GitHub will show a message like:
-> "Your site is live at `https://<your-username>.github.io/sachalayatan-downloader/`"
-
-It usually goes live within **1–2 minutes**.
-
----
-
 ## Using the tool
 
 1. Open the live URL in any modern browser (Chrome or Edge recommended)
-2. Type your Sachalayatan username (e.g. `mir178`) in the input box
+2. Type a username or `all` in the input box (see modes below)
 3. Click **Download All** (or press Enter)
 4. Watch the progress log — each article is fetched and converted in real time
 5. When done, click **⬇ Download ZIP**
-6. Extract the ZIP — you'll get a folder named after your username containing one PDF per article
-   - Files are numbered and named: `001_Article_Title.pdf`, `002_Next_Article.pdf`, etc.
+6. Extract the ZIP to get the folder of PDFs
+
+### Download modes
+
+| Input | What it downloads | ZIP file | Folder inside ZIP |
+|---|---|---|---|
+| `mir178` (any username) | All articles by that writer | `mir178_articles.zip` | `mir178/` |
+| `all` | Every article on sachalayatan.com | `sachalayatan_all_articles.zip` | `sachalayatan_all/` |
+
+> **Warning:** `all` mode crawls the entire site and may take many hours depending on total article count. A confirmation dialog will appear before it starts. Keep your browser open throughout.
+
+PDFs are numbered and named: `001_Article_Title.pdf`, `002_Next_Article.pdf`, etc.
 
 ---
 
@@ -103,19 +66,30 @@ Bengali text renders correctly because the page loads the **Hind Siliguri** font
 | Slow for large archives | 1.6 s delay between requests (polite crawling) | Let it run; 50 articles ≈ 5–7 minutes |
 | CORS proxy may be slow | `allorigins.win` is a free shared service | Retry if it times out |
 | Images may be missing | Cross-origin image loading is browser-restricted | Text and layout are always preserved |
-| PDFs are image-based | html2pdf renders via canvas | Text is not searchable; this is a known trade-off for Bengali script support |
+| PDFs are image-based | html2pdf renders via canvas | Text is not searchable; trade-off for Bengali script support |
+| `all` mode is very slow | Thousands of articles, 1.6 s each | Run overnight; browser must stay open |
 
 ---
 
-## Updating the tool
+## Deploying an updated version
 
-If you need to make changes (e.g., the site's HTML structure changes):
+The site is already live. To push changes:
 
 1. Edit `index.html` locally
-2. Commit and push to the same repository
-3. GitHub Pages redeploys automatically within ~1 minute
+2. Commit and push:
 
-If Claude is helping you update it, share this README and the current `index.html` — the selectors that matter are in the `scrapeArticle()` function:
+```powershell
+cd "C:\Users\mir17\OneDrive\Documents\Claude Code\sachalayatan-downloader"
+git add index.html README.md
+git commit -m "describe your change"
+git push
+```
+
+GitHub Pages redeploys automatically within ~1 minute.
+
+### If Claude is helping you update the code
+
+Share this README and the current `index.html`. The key selectors (may need updating if Sachalayatan changes its HTML) are in `scrapeArticle()`:
 
 ```javascript
 // Title:
@@ -131,7 +105,20 @@ doc.querySelector('div[id^="node-"][id$="-content"]')
 doc.querySelector('li.pager-last a')
 ```
 
-If Sachalayatan updates its layout, these selectors may need to change.
+The "all" mode article link pattern is in `parseArticleLinks()` — it matches any `/<username>/<numeric-id>` path while skipping reserved Drupal segments (node, admin, user, blog, sites, etc.) defined in `SKIP_SEGMENTS`.
+
+---
+
+## Deploying a fresh copy (for co-authors or forks)
+
+If someone else wants their own hosted copy:
+
+1. Fork https://github.com/mir17881/sachalayatan-downloader on GitHub
+2. Go to the forked repo → **Settings → Pages**
+3. Set source to **Deploy from branch → main → / (root)**
+4. The site goes live at `https://<their-username>.github.io/sachalayatan-downloader/`
+
+No code changes needed — the tool works for any Sachalayatan username.
 
 ---
 
