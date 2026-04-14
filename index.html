@@ -202,7 +202,7 @@
 <div class="card">
   <div class="card-header">
     <h1>সচলায়তন Article Downloader</h1>
-    <p>Enter your Sachalayatan username to download all your articles as individual PDFs in a single ZIP file.</p>
+    <p>Enter your Sachalayatan username to download all your articles as individual PDFs in a single ZIP file. Type <strong>all</strong> to download every article on the site.</p>
   </div>
 
   <div class="card-body">
@@ -212,7 +212,7 @@
       <input
         id="usernameInput"
         type="text"
-        placeholder="e.g. mir178"
+        placeholder="e.g. mir178  (or: all)"
         autocomplete="off"
         spellcheck="false"
       />
@@ -261,11 +261,19 @@ const BASE_URL   = 'https://www.sachalayatan.com';
 const PROXY_URL  = 'https://api.allorigins.win/get?url=';
 const DELAY_MS   = 1600; // ms between requests (polite crawling)
 
+// Drupal path segments that are never article usernames
+const SKIP_SEGMENTS = new Set([
+  'node','admin','user','blog','sites','modules','themes',
+  'misc','files','system','logout','search','taxonomy',
+  'comment','aggregator','tracker','contact',
+]);
+
 /* ─────────────────────────────────────────────
    STATE
 ───────────────────────────────────────────── */
 let zipBlob   = null;
 let username  = '';
+let allMode   = false;
 let failedArticles = [];
 
 /* ─────────────────────────────────────────────
@@ -295,7 +303,7 @@ function setStep(n) {
 }
 
 function resetUI() {
-  zipBlob = null; username = ''; failedArticles = [];
+  zipBlob = null; username = ''; allMode = false; failedArticles = [];
   $('usernameInput').value = '';
   $('usernameInput').disabled = false;
   $('startBtn').disabled = false;
@@ -314,11 +322,14 @@ function resetUI() {
 ───────────────────────────────────────────── */
 $('usernameInput').addEventListener('input', () => {
   const val = $('usernameInput').value.trim();
-  if (val) {
+  if (!val) {
+    $('urlPreview').innerHTML = '&nbsp;';
+  } else if (val.toLowerCase() === 'all') {
+    $('urlPreview').innerHTML =
+      `Will scrape: <span>all articles on sachalayatan.com</span> — this may take a very long time`;
+  } else {
     $('urlPreview').innerHTML =
       `Will scrape: <span>sachalayatan.com/blog/${val}</span>`;
-  } else {
-    $('urlPreview').innerHTML = '&nbsp;';
   }
 });
 
@@ -348,19 +359,29 @@ async function fetchHTML(url, attempt = 1) {
 
 /* ─────────────────────────────────────────────
    PARSE ARTICLE LINKS from a listing page
+   uname = specific username, or null for "all" mode
 ───────────────────────────────────────────── */
 function parseArticleLinks(html, uname) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const seen = new Set();
   const links = [];
-  const pattern = new RegExp(`^(?:${BASE_URL})?/${uname}/(\\d+)(?:[?#].*)?$`);
+
+  // Specific user: /<username>/<digits>
+  // All mode: /<any-non-reserved-segment>/<digits>
+  const pattern = uname
+    ? new RegExp(`^(?:${BASE_URL})?/${uname}/(\\d+)(?:[?#].*)?$`)
+    : new RegExp(`^(?:${BASE_URL})?/([a-zA-Z0-9_-]+)/(\\d+)(?:[?#].*)?$`);
 
   for (const a of doc.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href').split('?')[0].split('#')[0];
-    if (pattern.test(href)) {
-      const full = href.startsWith('http') ? href : BASE_URL + href;
-      if (!seen.has(full)) { seen.add(full); links.push(full); }
-    }
+    const m = href.match(pattern);
+    if (!m) continue;
+
+    // In "all" mode, skip reserved Drupal path segments
+    if (!uname && SKIP_SEGMENTS.has(m[1])) continue;
+
+    const full = href.startsWith('http') ? href : BASE_URL + href;
+    if (!seen.has(full)) { seen.add(full); links.push(full); }
   }
   return links;
 }
@@ -513,6 +534,15 @@ async function startDownload() {
     return;
   }
 
+  allMode = username === 'all';
+
+  // Warn before kicking off a full-site crawl
+  if (allMode && !confirm(
+    'You are about to download ALL articles from sachalayatan.com.\n\n' +
+    'This could take many hours depending on the total number of posts.\n\n' +
+    'Make sure your browser stays open throughout. Continue?'
+  )) return;
+
   // Lock UI
   $('usernameInput').disabled = true;
   $('startBtn').disabled = true;
@@ -521,7 +551,7 @@ async function startDownload() {
   failedArticles = [];
   zipBlob = null;
 
-  const BLOG_URL = `${BASE_URL}/blog/${username}`;
+  const BLOG_URL = allMode ? BASE_URL : `${BASE_URL}/blog/${username}`;
 
   try {
     /* ── STEP 1: Discover total pages ── */
@@ -538,7 +568,9 @@ async function startDownload() {
     setStep(2);
     const allURLs = [];
 
-    const firstPageLinks = parseArticleLinks(firstPageHTML, username);
+    const linkUsername = allMode ? null : username;
+
+    const firstPageLinks = parseArticleLinks(firstPageHTML, linkUsername);
     firstPageLinks.forEach(u => allURLs.push(u));
     log(`Page 1 / ${totalPages}: ${firstPageLinks.length} article(s)`, 'log-info');
     setProgress(5);
@@ -550,7 +582,7 @@ async function startDownload() {
       log(`Page ${p + 1} / ${totalPages}: fetching…`, 'log-dim');
       try {
         const html  = await fetchHTML(pageURL);
-        const links = parseArticleLinks(html, username);
+        const links = parseArticleLinks(html, linkUsername);
         links.forEach(u => { if (!allURLs.includes(u)) allURLs.push(u); });
         log(`Page ${p + 1} / ${totalPages}: ${links.length} article(s)`, 'log-info');
       } catch (err) {
@@ -571,7 +603,8 @@ async function startDownload() {
     /* ── STEP 3: Generate PDFs ── */
     setStep(3);
     const zip = new JSZip();
-    const folder = zip.folder(username);
+    const folderName = allMode ? 'sachalayatan_all' : username;
+    const folder = zip.folder(folderName);
 
     for (let i = 0; i < allURLs.length; i++) {
       const url = allURLs[i];
@@ -615,7 +648,7 @@ async function startDownload() {
     // Show download button
     $('downloadWrap').style.display = 'block';
     $('downloadNote').textContent =
-      `${successCount} article(s) · Extract the ZIP to get the "${username}" folder`;
+      `${successCount} article(s) · Extract the ZIP to get the "${folderName}" folder`;
 
     // Show error summary if any
     if (failedArticles.length > 0) {
@@ -645,7 +678,8 @@ function triggerDownload() {
   if (!zipBlob) return;
   const a = document.createElement('a');
   a.href = URL.createObjectURL(zipBlob);
-  a.download = `${username}_articles.zip`;
+  const zipName = allMode ? 'sachalayatan_all_articles.zip' : `${username}_articles.zip`;
+  a.download = zipName;
   a.click();
   URL.revokeObjectURL(a.href);
 }
