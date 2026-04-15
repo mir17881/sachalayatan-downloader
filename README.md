@@ -69,7 +69,7 @@ sachalayatan-downloader/
 
 ## One-time setup (do this once, never again)
 
-### Step 1 — Install Python
+### Step 1 — Install Python (if not already installed)
 
 **Windows:**
 1. Go to https://www.python.org/downloads/
@@ -104,19 +104,14 @@ Unzip it anywhere you like (e.g. your Desktop).
 
 ---
 
-### Step 4 — Install required packages
+### Step 4 — Run the setup file
 
-**Windows** — paste this into PowerShell and press Enter:
-```
-pip install requests beautifulsoup4 lxml flask
-```
+**Windows** — double-click `setup.bat`
 
-**Mac** — paste this into Terminal and press Enter:
-```
-pip3 install requests beautifulsoup4 lxml flask
-```
+**Mac** — double-click `setup.command`
+(First time on Mac: right-click → Open → Open to bypass the security warning)
 
-Wait for it to finish.
+The setup file will install all required packages automatically and tell you when it's done. You only need to run it once.
 
 ---
 
@@ -168,7 +163,7 @@ Close the black terminal window that opened when you double-clicked the start fi
 Python was not added to PATH. Reinstall Python and tick **"Add Python to PATH"** on the first screen.
 
 **"pip is not recognized" (Windows)**
-Run this instead: `python -m pip install requests beautifulsoup4 lxml flask`
+Open PowerShell in the project folder and run: `python -m pip install requests beautifulsoup4 lxml flask`
 
 **"Permission denied" on start.command (Mac)**
 Open Terminal, go to the project folder, and run: `chmod +x start.command` — then try again.
