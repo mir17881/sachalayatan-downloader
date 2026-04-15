@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sachalayatan Downloader</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>Sachalayatan Downloader</h1>
+    <span class="status-badge" id="status-badge">Idle</span>
+  </div>
+
+  <!-- ── Control Panel ── -->
+  <div class="panel" id="control-panel">
+
+    <div class="mode-row">
+      <button class="mode-btn active" data-mode="single">Single User</button>
+      <button class="mode-btn" data-mode="letters">By Letter</button>
+      <button class="mode-btn" data-mode="all">All Users</button>
+    </div>
+
+    <!-- Single user -->
+    <div class="input-area" id="input-single">
+      <label class="field-label">Username</label>
+      <input type="text" id="username-input" placeholder="e.g. tanvir_alamgir" autocomplete="off" spellcheck="false">
+    </div>
+
+    <!-- By letter -->
+    <div class="input-area hidden" id="input-letters">
+      <label class="field-label">Select starting letter(s)</label>
+      <div class="letter-grid" id="letter-grid"></div>
+      <div class="field-hint">Click to toggle. Downloads all matching users from the CSV file below.</div>
+      <div class="csv-picker">
+        <label class="field-label" style="margin-top:16px">CSV file <span class="required">required</span></label>
+        <div class="csv-row">
+          <label class="file-btn" for="csv-letters">Choose File</label>
+          <input type="file" id="csv-letters" accept=".csv" class="file-input">
+          <span class="file-name placeholder" id="csv-letters-name">No file chosen</span>
+          <button class="clear-btn hidden" id="csv-letters-clear">✕</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- All users -->
+    <div class="input-area hidden" id="input-all">
+      <div class="csv-picker">
+        <label class="field-label">CSV file <span class="required">required</span></label>
+        <div class="csv-row">
+          <label class="file-btn" for="csv-all">Choose File</label>
+          <input type="file" id="csv-all" accept=".csv" class="file-input">
+          <span class="file-name placeholder" id="csv-all-name">No file chosen</span>
+          <button class="clear-btn hidden" id="csv-all-clear">✕</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="start-btn" id="start-btn">Start Download</button>
+      <div class="error-msg hidden" id="start-error"></div>
+    </div>
+
+  </div>
+
+  <!-- ── Progress Panel ── -->
+  <div class="panel hidden" id="progress-panel">
+
+    <div class="progress-controls">
+      <div class="progress-ctrl-left">
+        <span class="paused-badge hidden" id="paused-badge">⏸ Paused</span>
+      </div>
+      <div class="progress-ctrl-right">
+        <button class="ctrl-btn pause-btn" id="pause-btn">Pause</button>
+        <button class="ctrl-btn stop-btn"  id="stop-btn">Stop</button>
+      </div>
+    </div>
+
+    <div class="progress-block">
+      <div class="progress-label">
+        <span id="overall-label">Overall progress</span>
+        <span class="progress-count" id="overall-count">0 / 0 users</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="overall-bar" style="width:0%"></div></div>
+    </div>
+
+    <div class="progress-block">
+      <div class="progress-label">
+        <span id="user-label">Current user</span>
+        <span class="progress-count" id="user-count"></span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="user-bar" style="width:0%"></div></div>
+    </div>
+
+    <div class="log-header">Live Log</div>
+    <div class="log" id="log"></div>
+
+  </div>
+
+  <!-- ── Stop confirmation modal ── -->
+  <div class="modal-overlay hidden" id="stop-modal">
+    <div class="modal">
+      <h3>Stop the download?</h3>
+      <p>Articles already saved will not be deleted. The remaining users in this batch will be skipped.</p>
+      <div class="modal-actions">
+        <button class="modal-cancel" id="modal-cancel">Keep going</button>
+        <button class="modal-confirm" id="modal-confirm">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Report Panel ── -->
+  <div class="panel hidden" id="report-panel">
+    <div class="report-top">
+      <h2 id="report-title">Download Complete</h2>
+      <div class="report-actions">
+        <a class="report-link hidden" id="report-link" target="_blank">Open Full Report</a>
+        <button class="new-btn" id="new-btn">New Download</button>
+      </div>
+    </div>
+    <div class="report-stats" id="report-stats"></div>
+    <div id="report-failed"></div>
+    <div class="failure-actions hidden" id="failure-actions">
+      <p class="failure-actions-label">Some users had failures:</p>
+      <div class="failure-btns">
+        <button class="retry-btn" id="retry-btn">Re-download failed users</button>
+        <button class="save-csv-btn" id="save-csv-btn">Save failed usernames as CSV</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+// ── Letter grid ────────────────────────────────────────────────────────────────
+const grid = document.getElementById('letter-grid');
+'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(ch => {
+  const b = document.createElement('button');
+  b.className = 'letter-btn';
+  b.textContent = ch;
+  b.dataset.letter = ch.toLowerCase();
+  b.addEventListener('click', () => b.classList.toggle('selected'));
+  grid.appendChild(b);
+});
+
+// ── Mode switching ─────────────────────────────────────────────────────────────
+let mode = 'single';
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    mode = btn.dataset.mode;
+    document.querySelectorAll('.input-area').forEach(el => el.classList.add('hidden'));
+    document.getElementById('input-' + mode).classList.remove('hidden');
+  });
+});
+
+// ── CSV file pickers ───────────────────────────────────────────────────────────
+function setupFilePicker(inputId, nameId, clearId) {
+  const input  = document.getElementById(inputId);
+  const nameEl = document.getElementById(nameId);
+  const clearEl = document.getElementById(clearId);
+
+  input.addEventListener('change', () => {
+    if (input.files[0]) {
+      nameEl.classList.remove('placeholder');
+      clearEl.classList.remove('hidden');
+      // Read file and show name + user count
+      const reader = new FileReader();
+      reader.onload = e => {
+        const lines = e.target.result.split('\n').filter(l => l.trim() && l.trim().toLowerCase() !== 'username');
+        nameEl.textContent = `${input.files[0].name}  (${lines.length} users)`;
+      };
+      reader.readAsText(input.files[0]);
+    }
+  });
+
+  clearEl.addEventListener('click', () => {
+    input.value = '';
+    nameEl.textContent = 'No file chosen';
+    nameEl.classList.add('placeholder');
+    clearEl.classList.add('hidden');
+  });
+}
+
+setupFilePicker('csv-letters', 'csv-letters-name', 'csv-letters-clear');
+setupFilePicker('csv-all',     'csv-all-name',     'csv-all-clear');
+
+// ── Start ──────────────────────────────────────────────────────────────────────
+document.getElementById('start-btn').addEventListener('click', startDownload);
+document.getElementById('username-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startDownload();
+});
+
+async function startDownload() {
+  const errEl = document.getElementById('start-error');
+  errEl.classList.add('hidden');
+
+  const fd = new FormData();
+  fd.append('mode', mode);
+
+  if (mode === 'single') {
+    const username = document.getElementById('username-input').value.trim();
+    if (!username) { showErr('Please enter a username.'); return; }
+    fd.append('username', username);
+  } else if (mode === 'letters') {
+    const letters = [...document.querySelectorAll('.letter-btn.selected')].map(b => b.dataset.letter);
+    if (!letters.length) { showErr('Please select at least one letter.'); return; }
+    const file = document.getElementById('csv-letters').files[0];
+    if (!file) { showErr('Please choose a CSV file.'); return; }
+    letters.forEach(l => fd.append('letters', l));
+    fd.append('csv', file);
+  } else if (mode === 'all') {
+    const file = document.getElementById('csv-all').files[0];
+    if (!file) { showErr('Please choose a CSV file.'); return; }
+    fd.append('csv', file);
+  }
+
+  const resp = await fetch('/start', { method: 'POST', body: fd });
+  const data = await resp.json();
+  if (!resp.ok) { showErr(data.error); return; }
+
+  switchTo('progress');
+  setBadge('running');
+  connectStream();
+}
+
+function showErr(msg) {
+  const el = document.getElementById('start-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+// ── Panel switching ────────────────────────────────────────────────────────────
+function switchTo(panel) {
+  ['control', 'progress', 'report'].forEach(p => {
+    document.getElementById(p + '-panel').classList.toggle('hidden', p !== panel);
+  });
+}
+
+// ── Status badge ───────────────────────────────────────────────────────────────
+function setBadge(state) {
+  const b = document.getElementById('status-badge');
+  b.className = 'status-badge ' + state;
+  b.textContent = state === 'running' ? 'Running…' : state === 'done' ? 'Done' : 'Idle';
+}
+
+// ── Pause / Resume / Stop ──────────────────────────────────────────────────────
+let isPaused = false;
+
+document.getElementById('pause-btn').addEventListener('click', async () => {
+  if (isPaused) {
+    await fetch('/resume', { method: 'POST' });
+  } else {
+    await fetch('/pause', { method: 'POST' });
+  }
+});
+
+document.getElementById('stop-btn').addEventListener('click', () => {
+  document.getElementById('stop-modal').classList.remove('hidden');
+});
+
+document.getElementById('modal-cancel').addEventListener('click', () => {
+  document.getElementById('stop-modal').classList.add('hidden');
+});
+
+document.getElementById('modal-confirm').addEventListener('click', async () => {
+  document.getElementById('stop-modal').classList.add('hidden');
+  document.getElementById('stop-btn').disabled = true;
+  document.getElementById('stop-btn').textContent = 'Stopping…';
+  await fetch('/stop', { method: 'POST' });
+});
+
+// ── SSE stream ─────────────────────────────────────────────────────────────────
+let es;
+
+function connectStream() {
+  if (es) es.close();
+  es = new EventSource('/stream');
+
+  es.addEventListener('start', e => {
+    const d = JSON.parse(e.data);
+    setOverall(0, d.total_users);
+  });
+
+  es.addEventListener('user_start', e => {
+    const d = JSON.parse(e.data);
+    setOverall(d.user_idx - 1, d.total_users, d.username);
+    setUser(0, 0, d.username);
+    log(`▶ ${d.username}  (user ${d.user_idx} of ${d.total_users})`, 'info');
+  });
+
+  es.addEventListener('user_articles_found', e => {
+    const d = JSON.parse(e.data);
+    setUser(0, d.total_articles, d.username);
+    log(`  Found ${d.total_articles} article${d.total_articles !== 1 ? 's' : ''}`, 'info');
+  });
+
+  es.addEventListener('article_done', e => {
+    const d = JSON.parse(e.data);
+    setUser(d.art_idx, d.total_articles, d.username);
+    log(`  ✓ [${d.art_idx}/${d.total_articles}] ${d.title}`, 'ok');
+  });
+
+  es.addEventListener('article_fail', e => {
+    const d = JSON.parse(e.data);
+    setUser(d.art_idx, d.total_articles, d.username);
+    log(`  ✗ [${d.art_idx}/${d.total_articles}] ${d.url} — ${d.error}`, 'fail');
+  });
+
+  es.addEventListener('user_done', e => {
+    const d = JSON.parse(e.data);
+    setOverall(d.user_idx, d.total_users);
+    log(`✔ ${d.username} — ${d.success} saved${d.failed ? ', ' + d.failed + ' failed' : ''}`, 'done');
+  });
+
+  es.addEventListener('user_error', e => {
+    const d = JSON.parse(e.data);
+    log(`✗ ${d.username} — ${d.error}`, 'fail');
+  });
+
+  es.addEventListener('paused', () => {
+    isPaused = true;
+    document.getElementById('pause-btn').textContent = 'Resume';
+    document.getElementById('pause-btn').classList.add('resume');
+    document.getElementById('paused-badge').classList.remove('hidden');
+    log('⏸ Download paused.', 'info');
+  });
+
+  es.addEventListener('resumed', () => {
+    isPaused = false;
+    document.getElementById('pause-btn').textContent = 'Pause';
+    document.getElementById('pause-btn').classList.remove('resume');
+    document.getElementById('paused-badge').classList.add('hidden');
+    log('▶ Download resumed.', 'info');
+  });
+
+  es.addEventListener('complete', e => {
+    const d = JSON.parse(e.data);
+    es.close();
+    setBadge('done');
+    showReport(d);
+  });
+
+  es.onerror = () => log('Connection interrupted — will retry…', 'info');
+}
+
+// ── Progress bars ──────────────────────────────────────────────────────────────
+function setOverall(done, total, user) {
+  const pct = total ? Math.round(done / total * 100) : 0;
+  document.getElementById('overall-bar').style.width = pct + '%';
+  document.getElementById('overall-count').textContent = `${done} / ${total} users`;
+  document.getElementById('overall-label').textContent =
+    user ? `Overall — ${user}` : 'Overall progress';
+}
+
+function setUser(done, total, user) {
+  const pct = total ? Math.round(done / total * 100) : 0;
+  document.getElementById('user-bar').style.width = pct + '%';
+  document.getElementById('user-count').textContent = total ? `${done} / ${total} articles` : '';
+  document.getElementById('user-label').textContent = user || 'Current user';
+}
+
+// ── Log ────────────────────────────────────────────────────────────────────────
+const logEl = document.getElementById('log');
+function log(text, type) {
+  const line = document.createElement('div');
+  line.className = 'log-line' + (type ? ' ' + type : '');
+  line.textContent = text;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ── Report ─────────────────────────────────────────────────────────────────────
+let _failedUsernames = [];
+
+function showReport(d) {
+  switchTo('report');
+  _failedUsernames = d.failed_usernames || [];
+
+  document.getElementById('report-title').textContent =
+    d.stopped ? 'Download Stopped' : 'Download Complete';
+
+  // Stats
+  document.getElementById('report-stats').innerHTML = `
+    <div class="stat"><div class="num">${d.total_users}</div><div class="lbl">Users</div></div>
+    <div class="stat"><div class="num ok">${d.articles_done}</div><div class="lbl">Articles saved</div></div>
+    <div class="stat"><div class="num ${d.articles_failed ? 'bad' : ''}">${d.articles_failed}</div><div class="lbl">Failed</div></div>
+    <div class="stat"><div class="ts">${d.timestamp}</div><div class="lbl">${d.stopped ? 'Stopped' : 'Completed'}</div></div>
+  `;
+
+  // Failed articles table
+  if (d.failed_list && d.failed_list.length) {
+    const rows = d.failed_list.map(f =>
+      `<tr><td>${f.username}</td><td><a href="${f.url}" target="_blank">${f.url}</a></td><td>${f.error}</td></tr>`
+    ).join('');
+    document.getElementById('report-failed').innerHTML = `
+      <h3 class="failed-heading">Failed Articles (${d.failed_list.length})</h3>
+      <table class="failed-table">
+        <thead><tr><th>User</th><th>URL</th><th>Error</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  // Report link
+  if (d.report_file) {
+    const link = document.getElementById('report-link');
+    link.href = `/reports/${d.report_file}`;
+    link.classList.remove('hidden');
+  }
+
+  // Failure actions
+  if (_failedUsernames.length) {
+    document.getElementById('failure-actions').classList.remove('hidden');
+  }
+}
+
+// Re-download failed users
+document.getElementById('retry-btn').addEventListener('click', async () => {
+  if (!_failedUsernames.length) return;
+  const resp = await fetch('/retry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ usernames: _failedUsernames }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) { alert(data.error); return; }
+
+  // Reset UI and switch to progress
+  document.getElementById('report-stats').innerHTML = '';
+  document.getElementById('report-failed').innerHTML = '';
+  document.getElementById('failure-actions').classList.add('hidden');
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('pause-btn').textContent = 'Pause';
+  document.getElementById('pause-btn').classList.remove('resume');
+  document.getElementById('pause-btn').disabled = false;
+  document.getElementById('stop-btn').disabled = false;
+  document.getElementById('stop-btn').textContent = 'Stop';
+  isPaused = false;
+  setOverall(0, 0); setUser(0, 0);
+  setBadge('running');
+  switchTo('progress');
+  connectStream();
+});
+
+// Save failed usernames as CSV
+document.getElementById('save-csv-btn').addEventListener('click', async () => {
+  if (!_failedUsernames.length) return;
+  const content = 'username\n' + _failedUsernames.join('\n');
+  const suggestedName = 'failed_users.csv';
+
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return; // user cancelled picker
+    }
+  }
+  // Fallback: browser download
+  const blob = new Blob([content], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = suggestedName;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// New download button
+document.getElementById('new-btn').addEventListener('click', () => {
+  document.getElementById('report-stats').innerHTML = '';
+  document.getElementById('report-failed').innerHTML = '';
+  document.getElementById('failure-actions').classList.add('hidden');
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('pause-btn').textContent = 'Pause';
+  document.getElementById('pause-btn').classList.remove('resume');
+  document.getElementById('pause-btn').disabled = false;
+  document.getElementById('stop-btn').disabled = false;
+  document.getElementById('stop-btn').textContent = 'Stop';
+  isPaused = false;
+  setOverall(0, 0); setUser(0, 0);
+  setBadge('idle');
+  switchTo('control');
+});
+
+// ── Reconnect if already running ───────────────────────────────────────────────
+fetch('/status').then(r => r.json()).then(d => {
+  if (d.running) {
+    switchTo('progress');
+    setBadge('running');
+    log('Reconnected to running download…', 'info');
+    connectStream();
+  }
+});
+</script>
+</body>
+</html>
