@@ -1,0 +1,10 @@
+# Downloaded articles — local only, never commit
+downloads/
+
+# Generated reports — local only
+reports/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

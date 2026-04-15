@@ -65,6 +65,8 @@ sachalayatan-downloader/
     report_2026-04-14_15-30.html
 ```
 
+> **Note:** The `downloads/` and `reports/` folders are excluded from git (via `.gitignore`). They exist on your local machine only and are never uploaded to GitHub. Back them up separately if needed.
+
 ---
 
 ## One-time setup (do this once, never again)
