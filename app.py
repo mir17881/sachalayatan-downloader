@@ -9,6 +9,7 @@ Then open: http://localhost:5000
 """
 
 import csv
+import hashlib
 import json
 import queue
 import threading
@@ -31,11 +32,34 @@ from sachalayatan_downloader import (
 
 app = Flask(__name__)
 
-DOWNLOADS_DIR = Path("downloads")
-REPORTS_DIR   = Path("reports")
+DOWNLOADS_DIR      = Path("downloads")
+REPORTS_DIR        = Path("reports")
+BATCH_PROGRESS_FILE = Path("batch_progress.json")
 
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 REPORTS_DIR.mkdir(exist_ok=True)
+
+
+# ── Batch progress ─────────────────────────────────────────────────────────────
+
+def _load_batch_progress():
+    if BATCH_PROGRESS_FILE.exists():
+        try:
+            return json.loads(BATCH_PROGRESS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_batch_progress(data):
+    BATCH_PROGRESS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _csv_key(filename, usernames):
+    """Stable key: filename + hash of first 20 usernames (identifies the file without hashing all)."""
+    sample = ",".join(usernames[:20])
+    h = hashlib.md5(sample.encode()).hexdigest()[:8]
+    return f"{Path(filename).stem}_{h}"
 
 
 # ── Job state ──────────────────────────────────────────────────────────────────
@@ -186,6 +210,9 @@ def run_download(usernames):
     failed_usernames    = set()
     stopped             = False
 
+    with _lock:
+        batch_meta = _job.pop("_batch", None)
+
     _broadcast("start", {"total_users": total_users})
 
     for user_idx, username in enumerate(usernames, 1):
@@ -300,6 +327,25 @@ def run_download(usernames):
     filename = f"report_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.html"
     (REPORTS_DIR / filename).write_text(report_html, encoding="utf-8")
 
+    # Save batch progress if this was a batch download
+    batch_next = None
+    if batch_meta and not stopped:
+        progress = _load_batch_progress()
+        new_position = batch_meta["position"] + len(usernames)
+        progress[batch_meta["key"]] = {
+            "position":     new_position,
+            "total":        batch_meta["total"],
+            "last_updated": timestamp,
+        }
+        _save_batch_progress(progress)
+        remaining = batch_meta["total"] - new_position
+        batch_next = {
+            "position":   new_position,
+            "total":      batch_meta["total"],
+            "remaining":  remaining,
+            "batch_size": batch_meta["batch_size"],
+        }
+
     _broadcast("complete", {
         "total_users":      total_users,
         "articles_done":    total_articles_done,
@@ -309,6 +355,7 @@ def run_download(usernames):
         "report_file":      filename,
         "timestamp":        timestamp,
         "stopped":          stopped,
+        "batch_next":       batch_next,
     })
 
     with _lock:
@@ -326,6 +373,27 @@ def index():
 def status():
     with _lock:
         return jsonify({"running": _job["running"]})
+
+
+@app.route("/batch-info", methods=["POST"])
+def batch_info():
+    """Return current batch position for an uploaded CSV (no download started)."""
+    csv_file = request.files.get("csv")
+    if not csv_file:
+        return jsonify({"error": "No file"}), 400
+    all_users, err = parse_csv_file(csv_file.stream)
+    if err:
+        return jsonify({"error": err}), 400
+    key      = _csv_key(csv_file.filename, all_users)
+    progress = _load_batch_progress()
+    entry    = progress.get(key, {})
+    position = entry.get("position", 0)
+    return jsonify({
+        "key":      key,
+        "total":    len(all_users),
+        "position": position,
+        "remaining": len(all_users) - position,
+    })
 
 
 
@@ -369,6 +437,40 @@ def start():
         else:
             usernames = all_users
 
+    elif mode == "batch":
+        csv_file = request.files.get("csv")
+        if not csv_file or not csv_file.filename:
+            return abort("Please choose a CSV file.")
+        try:
+            batch_size = int(request.form.get("batch_size", 100))
+        except ValueError:
+            return abort("Invalid batch size.")
+        if batch_size not in (50, 100, 200):
+            return abort("Batch size must be 50, 100, or 200.")
+
+        all_users, err = parse_csv_file(csv_file.stream)
+        if err:
+            return abort(err)
+        if not all_users:
+            return abort("The CSV file contains no usernames.")
+
+        key      = _csv_key(csv_file.filename, all_users)
+        progress = _load_batch_progress()
+        position = progress.get(key, {}).get("position", 0)
+
+        if position >= len(all_users):
+            return abort("All users in this CSV have already been downloaded. Reset to start over.")
+
+        usernames = all_users[position : position + batch_size]
+
+        # Store batch metadata so run_download can save progress on completion
+        _job["_batch"] = {
+            "key":       key,
+            "position":  position,
+            "batch_size": batch_size,
+            "total":     len(all_users),
+        }
+
     else:
         return abort("Invalid mode.")
 
@@ -397,6 +499,19 @@ def resume():
 def stop():
     _stop_event.set()
     _pause_event.set()   # unblock if currently paused
+    return jsonify({"ok": True})
+
+
+@app.route("/batch-reset", methods=["POST"])
+def batch_reset():
+    """Reset the saved position for a specific CSV key."""
+    key = (request.json or {}).get("key")
+    if not key:
+        return jsonify({"error": "No key"}), 400
+    progress = _load_batch_progress()
+    if key in progress:
+        del progress[key]
+        _save_batch_progress(progress)
     return jsonify({"ok": True})
 
 

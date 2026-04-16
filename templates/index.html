@@ -21,6 +21,7 @@
       <button class="mode-btn active" data-mode="single">Single User</button>
       <button class="mode-btn" data-mode="letters">By Letter</button>
       <button class="mode-btn" data-mode="all">All Users</button>
+      <button class="mode-btn" data-mode="batch">Batch</button>
     </div>
 
     <!-- Single user -->
@@ -55,6 +56,31 @@
           <span class="file-name placeholder" id="csv-all-name">No file chosen</span>
           <button class="clear-btn hidden" id="csv-all-clear">✕</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Batch -->
+    <div class="input-area hidden" id="input-batch">
+      <div class="csv-picker">
+        <label class="field-label">CSV file <span class="required">required</span></label>
+        <div class="csv-row">
+          <label class="file-btn" for="csv-batch">Choose File</label>
+          <input type="file" id="csv-batch" accept=".csv" class="file-input">
+          <span class="file-name placeholder" id="csv-batch-name">No file chosen</span>
+          <button class="clear-btn hidden" id="csv-batch-clear">✕</button>
+        </div>
+      </div>
+      <div class="batch-size-row">
+        <label class="field-label" style="margin-top:16px">Users per batch</label>
+        <div class="batch-size-btns">
+          <button class="batch-size-btn" data-size="50">50</button>
+          <button class="batch-size-btn active" data-size="100">100</button>
+          <button class="batch-size-btn" data-size="200">200</button>
+        </div>
+      </div>
+      <div class="batch-status hidden" id="batch-status">
+        <div class="batch-status-line" id="batch-status-line"></div>
+        <button class="batch-reset-btn hidden" id="batch-reset-btn">Reset progress</button>
       </div>
     </div>
 
@@ -122,6 +148,7 @@
     </div>
     <div class="report-stats" id="report-stats"></div>
     <div id="report-failed"></div>
+    <div class="batch-next-info hidden" id="batch-next-info"></div>
     <div class="failure-actions hidden" id="failure-actions">
       <p class="failure-actions-label">Some users had failures:</p>
       <div class="failure-btns">
@@ -187,6 +214,61 @@ function setupFilePicker(inputId, nameId, clearId) {
 
 setupFilePicker('csv-letters', 'csv-letters-name', 'csv-letters-clear');
 setupFilePicker('csv-all',     'csv-all-name',     'csv-all-clear');
+setupFilePicker('csv-batch',   'csv-batch-name',   'csv-batch-clear');
+
+// ── Batch size selector ────────────────────────────────────────────────────────
+let batchSize = 100;
+let batchKey  = null;
+
+document.querySelectorAll('.batch-size-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.batch-size-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    batchSize = parseInt(btn.dataset.size);
+  });
+});
+
+// When a batch CSV is chosen, fetch its current position from the server
+document.getElementById('csv-batch').addEventListener('change', async () => {
+  const file = document.getElementById('csv-batch').files[0];
+  if (!file) return;
+
+  const fd = new FormData();
+  fd.append('csv', file);
+  const resp = await fetch('/batch-info', { method: 'POST', body: fd });
+  if (!resp.ok) return;
+  const d = await resp.json();
+
+  batchKey = d.key;
+  const statusEl = document.getElementById('batch-status');
+  const lineEl   = document.getElementById('batch-status-line');
+  const resetBtn = document.getElementById('batch-reset-btn');
+  statusEl.classList.remove('hidden');
+
+  if (d.position === 0) {
+    lineEl.textContent = `${d.total.toLocaleString()} users total — will start from the beginning.`;
+    resetBtn.classList.add('hidden');
+  } else if (d.remaining <= 0) {
+    lineEl.textContent = `All ${d.total.toLocaleString()} users already downloaded. Reset to start over.`;
+    resetBtn.classList.remove('hidden');
+  } else {
+    lineEl.textContent =
+      `Resuming from user ${(d.position + 1).toLocaleString()} of ${d.total.toLocaleString()} — ${d.remaining.toLocaleString()} remaining.`;
+    resetBtn.classList.remove('hidden');
+  }
+});
+
+document.getElementById('batch-reset-btn').addEventListener('click', async () => {
+  if (!batchKey) return;
+  if (!confirm('Reset progress? The next batch will start from the beginning of the CSV.')) return;
+  await fetch('/batch-reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: batchKey }),
+  });
+  // Re-trigger the info fetch
+  document.getElementById('csv-batch').dispatchEvent(new Event('change'));
+});
 
 // ── Start ──────────────────────────────────────────────────────────────────────
 document.getElementById('start-btn').addEventListener('click', startDownload);
@@ -216,6 +298,11 @@ async function startDownload() {
     const file = document.getElementById('csv-all').files[0];
     if (!file) { showErr('Please choose a CSV file.'); return; }
     fd.append('csv', file);
+  } else if (mode === 'batch') {
+    const file = document.getElementById('csv-batch').files[0];
+    if (!file) { showErr('Please choose a CSV file.'); return; }
+    fd.append('csv', file);
+    fd.append('batch_size', batchSize);
   }
 
   const resp = await fetch('/start', { method: 'POST', body: fd });
@@ -342,6 +429,10 @@ function connectStream() {
     es.close();
     setBadge('done');
     showReport(d);
+    // Refresh batch status panel if batch mode was used
+    if (d.batch_next && document.getElementById('csv-batch').files[0]) {
+      document.getElementById('csv-batch').dispatchEvent(new Event('change'));
+    }
   });
 
   es.onerror = () => log('Connection interrupted — will retry…', 'info');
@@ -411,6 +502,25 @@ function showReport(d) {
     link.classList.remove('hidden');
   }
 
+  // Batch next-run info
+  const batchNextEl = document.getElementById('batch-next-info');
+  if (d.batch_next) {
+    const bn = d.batch_next;
+    if (bn.remaining > 0) {
+      batchNextEl.classList.remove('hidden');
+      batchNextEl.innerHTML =
+        `<div class="batch-next-msg">` +
+        `Batch done. <strong>${bn.remaining.toLocaleString()}</strong> users remaining in this CSV. ` +
+        `Next batch will start from user <strong>${(bn.position + 1).toLocaleString()}</strong> of ${bn.total.toLocaleString()}.` +
+        `</div>`;
+    } else {
+      batchNextEl.classList.remove('hidden');
+      batchNextEl.innerHTML = `<div class="batch-next-msg">All ${bn.total.toLocaleString()} users in this CSV have been downloaded.</div>`;
+    }
+  } else {
+    batchNextEl.classList.add('hidden');
+  }
+
   // Failure actions
   if (_failedUsernames.length) {
     document.getElementById('failure-actions').classList.remove('hidden');
@@ -478,6 +588,7 @@ document.getElementById('save-csv-btn').addEventListener('click', async () => {
 document.getElementById('new-btn').addEventListener('click', () => {
   document.getElementById('report-stats').innerHTML = '';
   document.getElementById('report-failed').innerHTML = '';
+  document.getElementById('batch-next-info').classList.add('hidden');
   document.getElementById('failure-actions').classList.add('hidden');
   document.getElementById('log').innerHTML = '';
   document.getElementById('pause-btn').textContent = 'Pause';
