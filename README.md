@@ -35,6 +35,16 @@ Once the browser opens at `http://localhost:5000`:
 3. Click **Start Download**
    This downloads every username in the CSV.
 
+### Download in batches
+1. Select **Batch**
+2. Click **Choose File** and select your CSV file
+3. Choose how many users per batch: **50**, **100**, or **200**
+4. Click **Start Download**
+
+The app remembers your position in the CSV. Each time you run a batch, it continues from where the previous one left off. The status line shows: *"Resuming from user 101 of 35,756 — 35,656 remaining."*
+
+Use **Reset progress** to start over from the beginning of the CSV.
+
 ### While downloading
 - **Top bar** — shows overall progress across all users
 - **Second bar** — shows progress for the current user's articles
